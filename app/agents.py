@@ -1,5 +1,6 @@
 from __future__ import annotations
 import os
+from pydantic import BaseModel, Field
 from agents import Agent, WebSearchTool
 from .tools import save_opportunity, queue_external_action
 
@@ -14,6 +15,40 @@ or communicates professional legal advice externally must require explicit human
 Focus on South Africa first unless the economics clearly favor an international online market.
 """
 
+
+class OpportunityCandidate(BaseModel):
+    title: str = Field(min_length=8)
+    audience: str = Field(min_length=8)
+    offer: str = Field(min_length=12)
+    channel: str = Field(min_length=4)
+    estimated_price_zar: float = Field(gt=0)
+    score: float = Field(ge=0, le=100)
+    rationale: str = Field(min_length=20)
+
+
+class OpportunityBatch(BaseModel):
+    opportunities: list[OpportunityCandidate] = Field(min_length=2, max_length=2)
+
+
+sprint_scout = Agent(
+    name="Sprint Opportunity Scout",
+    model=MODEL,
+    instructions=COMMON_RULES + """
+Research current, concrete online commercial opportunities for a South African operator with strengths in
+B2B business, professional services, contract/document workflows, business development and content.
+Use web search for current evidence. Return exactly TWO distinct opportunities.
+
+Each opportunity must contain substantive real values for every field. Never return schema labels or
+placeholder strings such as 'title', 'audience', 'offer', 'channel', 'score', 'rationale', 'TBD', or 'N/A'.
+Score each opportunity 0-100 based on demand, buyer intent, margin, speed to first sale, repeatability,
+competition and implementation effort. Prefer low-capital offers capable of testing toward the first
+R10,000 in attributable revenue. Do not send, publish, spend money, or contact anyone.
+""",
+    tools=[WebSearchTool(search_context_size="medium")],
+    output_type=OpportunityBatch,
+)
+
+
 scout = Agent(
     name="Opportunity Scout",
     model=MODEL,
@@ -21,13 +56,9 @@ scout = Agent(
 Research current online commercial opportunities. Find concrete customer pain, buyer intent, competitors,
 pricing signals and accessible distribution channels. Score opportunities 0-100 based on demand,
 buyer intent, margin, speed to first sale, repeatability, competition and implementation effort.
-Use web search for current evidence.
-
-MANDATORY PERSISTENCE RULE:
-- You must identify exactly TWO strong opportunities.
-- You must call save_opportunity once for EACH of the two opportunities before returning any final answer.
-- Do not merely describe opportunities in prose. If an opportunity has not been saved with save_opportunity, the task is incomplete.
-- After both save_opportunity calls succeed, return a short confirmation summarizing the two saved opportunities.
+Use web search for current evidence. Save exactly TWO strong opportunities using save_opportunity.
+Never pass field names or placeholder strings as tool arguments. Every tool argument must contain the actual
+researched value. After both saves succeed, summarize the two saved opportunities.
 """,
     tools=[WebSearchTool(search_context_size="medium"), save_opportunity],
 )
@@ -127,19 +158,15 @@ manager = Agent(
     model=MODEL,
     instructions=COMMON_RULES + """
 You are the operating manager. Your job is to reach the first R10,000 in attributable online revenue
-as efficiently as possible, then build toward repeatable monthly revenue.
-
-MANDATORY FIRST STEP:
-- Your first substantive action must be to call research_opportunities.
-- That specialist is required to save exactly two opportunities to the pipeline.
-- Do not produce your final memo until research_opportunities has completed.
-
-Then use specialists as needed. Prioritize one primary experiment at a time and keep a second experiment
+as efficiently as possible, then build toward repeatable monthly revenue. Use specialists rather than
+trying to do every task yourself. Prioritize one primary experiment at a time and keep a second experiment
 as backup. Produce a concise decision memo containing: selected opportunity, why now, offer, price,
 distribution, first 10 actions, metrics, risks, and exactly what requires human approval.
+You MUST call research_opportunities before producing your memo. Do not finish until the specialist confirms
+that two opportunities were saved successfully.
 """,
     tools=[
-        scout.as_tool(tool_name="research_opportunities", tool_description="MANDATORY: research and save exactly two current revenue opportunities before the manager returns a memo."),
+        scout.as_tool(tool_name="research_opportunities", tool_description="Research and save exactly two current revenue opportunities before the manager memo is produced."),
         offer_builder.as_tool(tool_name="build_offer", tool_description="Turn an opportunity into a commercial offer."),
         product_factory.as_tool(tool_name="design_product", tool_description="Design the minimum viable product or productized service."),
         lead_agent.as_tool(tool_name="build_lead_plan", tool_description="Design prospecting and outreach for an offer."),
