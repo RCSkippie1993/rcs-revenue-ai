@@ -41,6 +41,15 @@ CREATE TABLE IF NOT EXISTS execution_packages (
     status TEXT NOT NULL DEFAULT 'draft',
     FOREIGN KEY(opportunity_id) REFERENCES opportunities(id)
 );
+CREATE TABLE IF NOT EXISTS prospect_batches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    package_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    batch_markdown TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'draft',
+    FOREIGN KEY(package_id) REFERENCES execution_packages(id)
+);
 """
 
 def connect():
