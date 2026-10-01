@@ -1,5 +1,4 @@
 from pathlib import Path
-import asyncio
 import logging
 import os
 import sys
@@ -65,7 +64,7 @@ Rationale: {row.get('rationale', '')}
 The operator is in South Africa. Optimize for reaching the first R10,000 in attributable revenue with low capital.
 Prepare material for human approval only. Do not send, publish, spend money, or invent named prospects.
 """
-    result = asyncio.run(Runner.run(execution_agent, prompt))
+    result = Runner.run_sync(execution_agent, prompt)
     if result.interruptions:
         raise RuntimeError("Execution package unexpectedly requested an external action.")
     output = str(result.final_output)
@@ -102,7 +101,7 @@ Approved package content:
 Research 15 real prospects, primarily in South Africa. Use current public web evidence and include source URLs.
 Draft personalized outreach, but do not contact anyone or submit any form.
 """
-    result = asyncio.run(Runner.run(prospect_agent, prompt))
+    result = Runner.run_sync(prospect_agent, prompt)
     if result.interruptions:
         raise RuntimeError("Prospect research unexpectedly requested an external action.")
     output = str(result.final_output)
@@ -164,7 +163,7 @@ if st.sidebar.button("Run Revenue Sprint 001", disabled=not api_ready):
                 from agents import Runner
                 from app.agents import manager
                 from app.run import START_PROMPT
-                result = asyncio.run(Runner.run(manager, START_PROMPT))
+                result = Runner.run_sync(manager, START_PROMPT)
                 if result.interruptions:
                     st.warning("The run paused for approval. No gated external action was executed.")
                 else:
