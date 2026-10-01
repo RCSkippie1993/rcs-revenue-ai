@@ -32,6 +32,15 @@ CREATE TABLE IF NOT EXISTS revenue_events (
     amount_zar REAL NOT NULL,
     note TEXT
 );
+CREATE TABLE IF NOT EXISTS execution_packages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    opportunity_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    package_markdown TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'draft',
+    FOREIGN KEY(opportunity_id) REFERENCES opportunities(id)
+);
 """
 
 def connect():
