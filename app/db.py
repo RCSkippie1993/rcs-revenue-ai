@@ -100,6 +100,10 @@ class PostgresCompatConnection:
     def __init__(self, conn):
         self._conn = conn
 
+    def cursor(self, *args, **kwargs):
+        # pandas.read_sql_query expects a standard DB-API connection exposing cursor().
+        return self._conn.cursor(*args, **kwargs)
+
     def execute(self, sql, params=None):
         return self._conn.execute(sql.replace("?", "%s"), params or ())
 
