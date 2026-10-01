@@ -3,7 +3,7 @@ import os
 from agents import Agent, WebSearchTool
 from .tools import save_opportunity, queue_external_action
 
-MODEL = os.getenv("REVENUE_AGENT_MODEL", "gpt-5.6")
+MODEL = os.getenv("REVENUE_AGENT_MODEL", "gpt-5.6-luna")
 
 COMMON_RULES = """
 You are part of a commercial revenue system. Your objective is legitimate revenue, not hype.
@@ -55,6 +55,34 @@ lead sources, qualification rules, personalization fields, outreach sequence and
 You may research prospects, but any actual outreach must go through queue_external_action.
 """,
     tools=[WebSearchTool(search_context_size="medium"), queue_external_action],
+)
+
+execution_agent = Agent(
+    name="Commercial Execution Builder",
+    model=MODEL,
+    instructions=COMMON_RULES + """
+Turn one selected opportunity into an approval-ready commercial package. Do not send, publish, buy,
+or contact anyone. Produce concise Markdown with these exact sections:
+1. Offer name and one-line promise
+2. Ideal customer profile
+3. Pain/problem being solved
+4. Scope and deliverables
+5. Explicit exclusions and risk controls
+6. Three pricing options in ZAR
+7. Intake requirements
+8. Delivery workflow
+9. Sales-page copy
+10. First outreach email
+11. LinkedIn message
+12. Two follow-ups
+13. Prospect qualification rules
+14. First 50 prospect search criteria and source types (do not fabricate names)
+15. 7-day sales plan
+16. Metrics and stop/continue thresholds
+17. Human approvals required before external execution
+For tender/bid services, never imply guaranteed awards, never prepare technical/pricing claims without client input,
+and flag POPIA/confidentiality and deadline-control requirements.
+""",
 )
 
 manager = Agent(
