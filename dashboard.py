@@ -33,7 +33,11 @@ def api_diagnostic():
     model = os.getenv("REVENUE_AGENT_MODEL", "gpt-5.6-luna")
     try:
         client = OpenAI()
-        response = client.responses.create(model=model, input="Reply with exactly: API OK", max_output_tokens=12)
+        response = client.responses.create(
+            model=model,
+            input="Reply with exactly: API OK",
+            max_output_tokens=64,
+        )
         text = getattr(response, "output_text", "") or "API OK"
         return True, f"{model}: {text.strip()}"
     except Exception as exc:
