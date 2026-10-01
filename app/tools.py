@@ -12,25 +12,25 @@ def save_opportunity(
     score: float,
     rationale: str,
 ) -> str:
-    """Save a commercially promising opportunity to the local pipeline."""
+    """Save a commercially promising opportunity to the pipeline."""
     with connect() as conn:
-        cur = conn.execute(
+        conn.execute(
             """INSERT INTO opportunities
             (created_at,title,audience,offer,channel,estimated_price_zar,score,rationale)
             VALUES (?,?,?,?,?,?,?,?)""",
             (now_iso(), title, audience, offer, channel, estimated_price_zar, score, rationale),
         )
-        return f"Saved opportunity #{cur.lastrowid}: {title}"
+    return f"Saved opportunity: {title}"
 
 @function_tool(needs_approval=True)
 def queue_external_action(action_type: str, payload: str) -> str:
     """Queue an external action such as publishing, sending outreach, spending money or changing a live offer. Always requires human approval."""
     with connect() as conn:
-        cur = conn.execute(
+        conn.execute(
             "INSERT INTO approvals (created_at, action_type, payload) VALUES (?,?,?)",
             (now_iso(), action_type, payload),
         )
-        return f"Queued approval #{cur.lastrowid}: {action_type}"
+    return f"Queued approval: {action_type}"
 
 @function_tool
 def log_revenue(source: str, amount_zar: float, note: str = "") -> str:
