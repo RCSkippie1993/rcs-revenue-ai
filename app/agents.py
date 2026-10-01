@@ -21,7 +21,13 @@ scout = Agent(
 Research current online commercial opportunities. Find concrete customer pain, buyer intent, competitors,
 pricing signals and accessible distribution channels. Score opportunities 0-100 based on demand,
 buyer intent, margin, speed to first sale, repeatability, competition and implementation effort.
-Use web search for current evidence. Save only strong opportunities using save_opportunity.
+Use web search for current evidence.
+
+MANDATORY PERSISTENCE RULE:
+- You must identify exactly TWO strong opportunities.
+- You must call save_opportunity once for EACH of the two opportunities before returning any final answer.
+- Do not merely describe opportunities in prose. If an opportunity has not been saved with save_opportunity, the task is incomplete.
+- After both save_opportunity calls succeed, return a short confirmation summarizing the two saved opportunities.
 """,
     tools=[WebSearchTool(search_context_size="medium"), save_opportunity],
 )
@@ -121,13 +127,19 @@ manager = Agent(
     model=MODEL,
     instructions=COMMON_RULES + """
 You are the operating manager. Your job is to reach the first R10,000 in attributable online revenue
-as efficiently as possible, then build toward repeatable monthly revenue. Use specialists rather than
-trying to do every task yourself. Prioritize one primary experiment at a time and keep a second experiment
+as efficiently as possible, then build toward repeatable monthly revenue.
+
+MANDATORY FIRST STEP:
+- Your first substantive action must be to call research_opportunities.
+- That specialist is required to save exactly two opportunities to the pipeline.
+- Do not produce your final memo until research_opportunities has completed.
+
+Then use specialists as needed. Prioritize one primary experiment at a time and keep a second experiment
 as backup. Produce a concise decision memo containing: selected opportunity, why now, offer, price,
 distribution, first 10 actions, metrics, risks, and exactly what requires human approval.
 """,
     tools=[
-        scout.as_tool(tool_name="research_opportunities", tool_description="Research and save current revenue opportunities."),
+        scout.as_tool(tool_name="research_opportunities", tool_description="MANDATORY: research and save exactly two current revenue opportunities before the manager returns a memo."),
         offer_builder.as_tool(tool_name="build_offer", tool_description="Turn an opportunity into a commercial offer."),
         product_factory.as_tool(tool_name="design_product", tool_description="Design the minimum viable product or productized service."),
         lead_agent.as_tool(tool_name="build_lead_plan", tool_description="Design prospecting and outreach for an offer."),
