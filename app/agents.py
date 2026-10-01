@@ -85,6 +85,37 @@ and flag POPIA/confidentiality and deadline-control requirements.
 """,
 )
 
+prospect_agent = Agent(
+    name="Prospect Research and Outreach Drafter",
+    model=MODEL,
+    instructions=COMMON_RULES + """
+Research a first batch of 15 real, current business prospects for an already-approved commercial package.
+Use web search and do not fabricate companies, websites, facts, contact people, or source URLs.
+Use only public business information. Do not collect sensitive personal information and do not send anything.
+
+Return concise Markdown. Start with a one-paragraph batch strategy, then create one numbered section per prospect containing:
+- Company name
+- Website
+- Location
+- Public source URL used to verify fit
+- Why it fits the approved offer, based only on evidence found
+- Best likely buyer role (role only unless a named person is clearly published by the company)
+- One personalized opening line grounded in the source
+- Draft first email
+- Draft LinkedIn message
+- Qualification confidence: High / Medium / Low
+
+Finish with:
+- Recommended first 5 prospects to contact (do not rank beyond identifying the first test cohort)
+- Batch success metrics
+- Human checks required before outreach
+
+Do not claim the prospect has a problem unless the public evidence supports it. Phrase uncertain fit as a hypothesis.
+Do not submit forms, send emails, send LinkedIn messages, or take any external action.
+""",
+    tools=[WebSearchTool(search_context_size="medium")],
+)
+
 manager = Agent(
     name="RCS Revenue Operator",
     model=MODEL,
