@@ -30,6 +30,13 @@ def load_data():
     return opps, packages, batches, approvals, revenue
 
 
+def safe_float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def api_diagnostic():
     model = os.getenv("REVENUE_AGENT_MODEL", "gpt-5.6-luna")
     try:
@@ -44,6 +51,53 @@ def api_diagnostic():
     except Exception as exc:
         logger.exception("OpenAI API diagnostic failed")
         return False, f"{type(exc).__name__}: {exc}"
+
+
+def run_revenue_sprint():
+    from agents import Runner
+    from app.agents import sprint_scout
+
+    prompt = """
+Find exactly two current low-capital online commercial opportunities for Rikus in South Africa using his
+strengths in B2B business, professional services, contract/document workflows, business development and content.
+Target the first R10,000 in attributable online revenue. Use current web evidence. Return only validated,
+substantive opportunities through the typed output schema. Do not contact anyone or take external action.
+"""
+    result = Runner.run_sync(sprint_scout, prompt)
+    if result.interruptions:
+        raise RuntimeError("Opportunity research unexpectedly requested approval.")
+
+    batch = result.final_output
+    candidates = list(batch.opportunities)
+    if len(candidates) != 2:
+        raise RuntimeError(f"Expected exactly 2 opportunities, received {len(candidates)}.")
+
+    with connect() as conn:
+        conn.execute("DELETE FROM opportunities WHERE title=? AND audience=?", ("title", "audience"))
+        for item in candidates:
+            conn.execute(
+                """INSERT INTO opportunities
+                (created_at,title,audience,offer,channel,estimated_price_zar,score,rationale,status)
+                VALUES (?,?,?,?,?,?,?,?,?)""",
+                (
+                    now_iso(), item.title, item.audience, item.offer, item.channel,
+                    float(item.estimated_price_zar), float(item.score), item.rationale, "new"
+                ),
+            )
+
+    memo_lines = ["## Revenue Sprint 001", "", "Two validated opportunities were researched and saved:", ""]
+    for idx, item in enumerate(candidates, start=1):
+        memo_lines.extend([
+            f"### {idx}. {item.title}",
+            f"**Audience:** {item.audience}",
+            f"**Offer:** {item.offer}",
+            f"**Channel:** {item.channel}",
+            f"**Price hypothesis:** R{item.estimated_price_zar:,.0f}",
+            f"**Score:** {item.score:.0f}/100",
+            f"**Rationale:** {item.rationale}",
+            "",
+        ])
+    return "\n".join(memo_lines)
 
 
 def build_execution_package(row):
@@ -153,23 +207,17 @@ if st.sidebar.button("Test OpenAI connection", disabled=not api_ready):
         st.code(detail)
 
 if st.sidebar.button("Run Revenue Sprint 001", disabled=not api_ready):
-    with st.spinner("Researching opportunities..."):
+    with st.spinner("Researching and validating two opportunities..."):
         try:
             ok, detail = api_diagnostic()
             if not ok:
                 st.error("Revenue Sprint did not start because the API check failed.")
                 st.code(detail)
             else:
-                from agents import Runner
-                from app.agents import manager
-                from app.run import START_PROMPT
-                result = Runner.run_sync(manager, START_PROMPT)
-                if result.interruptions:
-                    st.warning("The run paused for approval. No gated external action was executed.")
-                else:
-                    st.session_state["last_sprint"] = str(result.final_output)
-                    st.success("Revenue Sprint 001 completed.")
-                    st.rerun()
+                memo = run_revenue_sprint()
+                st.session_state["last_sprint"] = memo
+                st.success("Revenue Sprint 001 completed and saved two validated opportunities.")
+                st.rerun()
         except Exception as exc:
             logger.exception("Revenue Sprint failed")
             st.error("Revenue Sprint failed.")
@@ -193,8 +241,8 @@ if opps.empty:
     st.info("No opportunities yet. Run Revenue Sprint 001 once.")
 else:
     for _, row in opps.iterrows():
-        score = row.get("score", 0)
-        price = row.get("estimated_price_zar", 0)
+        score = safe_float(row.get("score"))
+        price = safe_float(row.get("estimated_price_zar"))
         with st.container(border=True):
             left, right = st.columns([4, 1])
             with left:
@@ -204,8 +252,8 @@ else:
                 st.write(f"**Primary channel:** {row.get('channel', '')}")
                 st.write(f"**Why it may work:** {row.get('rationale', '')}")
             with right:
-                st.metric("Score", f"{score:.0f}/100" if pd.notna(score) else "—")
-                st.metric("Price hypothesis", f"R{price:,.0f}" if pd.notna(price) else "—")
+                st.metric("Score", f"{score:.0f}/100" if score is not None else "—")
+                st.metric("Price hypothesis", f"R{price:,.0f}" if price is not None else "—")
                 st.caption(f"Status: {row.get('status', 'new')}")
                 existing = packages[packages.opportunity_id == int(row["id"])] if not packages.empty else pd.DataFrame()
                 if existing.empty:
