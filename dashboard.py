@@ -20,19 +20,41 @@ st.title("RCS Revenue AI")
 st.caption("Commercial execution console: opportunity → package → prospects → approval → revenue")
 
 
+def query_df(conn, sql, params=None):
+    cur = conn.execute(sql, params or ())
+    rows = cur.fetchall()
+    if rows:
+        first = rows[0]
+        if hasattr(first, "keys"):
+            return pd.DataFrame([dict(row) for row in rows])
+        columns = [desc.name if hasattr(desc, "name") else desc[0] for desc in cur.description]
+        return pd.DataFrame(rows, columns=columns)
+    columns = [desc.name if hasattr(desc, "name") else desc[0] for desc in (cur.description or [])]
+    return pd.DataFrame(columns=columns)
+
+
 def load_data():
     with connect() as conn:
-        opps = pd.read_sql_query("SELECT * FROM opportunities ORDER BY score DESC, id DESC", conn)
-        packages = pd.read_sql_query("SELECT * FROM execution_packages ORDER BY id DESC", conn)
-        batches = pd.read_sql_query("SELECT * FROM prospect_batches ORDER BY id DESC", conn)
-        approvals = pd.read_sql_query("SELECT * FROM approvals ORDER BY id DESC", conn)
-        revenue = pd.read_sql_query("SELECT * FROM revenue_events ORDER BY id DESC", conn)
+        # Remove the two malformed placeholder rows created by the early tool-call prototype.
+        conn.execute("DELETE FROM opportunities WHERE title=? AND audience=?", ("title", "audience"))
+        opps = query_df(conn, "SELECT * FROM opportunities ORDER BY score DESC, id DESC")
+        packages = query_df(conn, "SELECT * FROM execution_packages ORDER BY id DESC")
+        batches = query_df(conn, "SELECT * FROM prospect_batches ORDER BY id DESC")
+        approvals = query_df(conn, "SELECT * FROM approvals ORDER BY id DESC")
+        revenue = query_df(conn, "SELECT * FROM revenue_events ORDER BY id DESC")
     return opps, packages, batches, approvals, revenue
 
 
 def safe_float(value):
     try:
         return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def safe_int(value):
+    try:
+        return int(value)
     except (TypeError, ValueError):
         return None
 
@@ -104,9 +126,12 @@ def build_execution_package(row):
     from agents import Runner
     from app.agents import execution_agent
 
+    row_id = safe_int(row.get("id"))
+    if row_id is None:
+        raise RuntimeError("Opportunity has an invalid database ID.")
     prompt = f"""
 Build an approval-ready commercial execution package for this opportunity.
-Opportunity ID: {int(row['id'])}
+Opportunity ID: {row_id}
 Title: {row['title']}
 Audience: {row.get('audience', '')}
 Current offer hypothesis: {row.get('offer', '')}
@@ -125,9 +150,9 @@ Prepare material for human approval only. Do not send, publish, spend money, or 
     with connect() as conn:
         conn.execute(
             "INSERT INTO execution_packages (created_at, opportunity_id, title, package_markdown, status) VALUES (?,?,?,?,?)",
-            (now_iso(), int(row["id"]), str(row["title"]), output, "draft"),
+            (now_iso(), row_id, str(row["title"]), output, "draft"),
         )
-        conn.execute("UPDATE opportunities SET status='package_ready' WHERE id=?", (int(row["id"]),))
+        conn.execute("UPDATE opportunities SET status='package_ready' WHERE id=?", (row_id,))
     return output
 
 
@@ -144,9 +169,12 @@ def build_prospect_batch(pkg):
     from agents import Runner
     from app.agents import prospect_agent
 
+    package_id = safe_int(pkg.get("id"))
+    if package_id is None:
+        raise RuntimeError("Package has an invalid database ID.")
     prompt = f"""
 Research the first prospect batch for this approved commercial package.
-Package ID: {int(pkg['id'])}
+Package ID: {package_id}
 Offer title: {pkg['title']}
 Approved package content:
 
@@ -162,7 +190,7 @@ Draft personalized outreach, but do not contact anyone or submit any form.
     with connect() as conn:
         conn.execute(
             "INSERT INTO prospect_batches (created_at, package_id, title, batch_markdown, status) VALUES (?,?,?,?,?)",
-            (now_iso(), int(pkg["id"]), str(pkg["title"]), output, "draft"),
+            (now_iso(), package_id, str(pkg["title"]), output, "draft"),
         )
     return output
 
@@ -229,8 +257,8 @@ c1, c2, c3, c4, c5 = st.columns(5)
 c1.metric("Opportunities", len(opps))
 c2.metric("Packages", len(packages))
 c3.metric("Prospect batches", len(batches))
-c4.metric("Pending approvals", int((approvals.status == "pending").sum()) if not approvals.empty else 0)
-c5.metric("Revenue logged", f"R{revenue.amount_zar.sum():,.2f}" if not revenue.empty else "R0.00")
+c4.metric("Pending approvals", int((approvals.status == "pending").sum()) if not approvals.empty and "status" in approvals.columns else 0)
+c5.metric("Revenue logged", f"R{pd.to_numeric(revenue.get('amount_zar', pd.Series(dtype=float)), errors='coerce').fillna(0).sum():,.2f}" if not revenue.empty else "R0.00")
 
 if "last_sprint" in st.session_state:
     with st.expander("Latest Revenue Sprint memo"):
@@ -241,12 +269,13 @@ if opps.empty:
     st.info("No opportunities yet. Run Revenue Sprint 001 once.")
 else:
     for _, row in opps.iterrows():
+        row_id = safe_int(row.get("id"))
         score = safe_float(row.get("score"))
         price = safe_float(row.get("estimated_price_zar"))
         with st.container(border=True):
             left, right = st.columns([4, 1])
             with left:
-                st.markdown(f"### {row['title']}")
+                st.markdown(f"### {row.get('title', 'Untitled opportunity')}")
                 st.write(f"**Audience:** {row.get('audience', '')}")
                 st.write(f"**Offer:** {row.get('offer', '')}")
                 st.write(f"**Primary channel:** {row.get('channel', '')}")
@@ -255,9 +284,12 @@ else:
                 st.metric("Score", f"{score:.0f}/100" if score is not None else "—")
                 st.metric("Price hypothesis", f"R{price:,.0f}" if price is not None else "—")
                 st.caption(f"Status: {row.get('status', 'new')}")
-                existing = packages[packages.opportunity_id == int(row["id"])] if not packages.empty else pd.DataFrame()
+                if row_id is None:
+                    st.error("Invalid legacy opportunity row. It will be ignored.")
+                    continue
+                existing = packages[packages.opportunity_id == row_id] if not packages.empty and "opportunity_id" in packages.columns else pd.DataFrame()
                 if existing.empty:
-                    if st.button("Develop package", key=f"develop_{int(row['id'])}", type="primary", disabled=not api_ready):
+                    if st.button("Develop package", key=f"develop_{row_id}", type="primary", disabled=not api_ready):
                         with st.spinner("Building offer, pricing, copy and 7-day sales plan..."):
                             try:
                                 build_execution_package(row)
@@ -274,27 +306,30 @@ if packages.empty:
     st.info("Choose an opportunity above and click Develop package.")
 else:
     for _, pkg in packages.iterrows():
+        pkg_id = safe_int(pkg.get("id"))
+        if pkg_id is None:
+            continue
         with st.container(border=True):
             header_left, header_right = st.columns([4, 1])
             with header_left:
-                st.markdown(f"### {pkg['title']}")
+                st.markdown(f"### {pkg.get('title', 'Untitled package')}")
             with header_right:
-                st.write(f"**{str(pkg['status']).upper()}**")
-            with st.expander("View commercial package", expanded=pkg["status"] == "draft"):
-                st.markdown(pkg["package_markdown"])
-            if pkg["status"] == "draft":
+                st.write(f"**{str(pkg.get('status', 'draft')).upper()}**")
+            with st.expander("View commercial package", expanded=pkg.get("status") == "draft"):
+                st.markdown(pkg.get("package_markdown", ""))
+            if pkg.get("status") == "draft":
                 a, b, _ = st.columns([1, 1, 4])
-                if a.button("Approve package", key=f"approve_{int(pkg['id'])}", type="primary"):
-                    set_package_status(int(pkg["id"]), "approved")
+                if a.button("Approve package", key=f"approve_{pkg_id}", type="primary"):
+                    set_package_status(pkg_id, "approved")
                     st.success("Approved. No outreach has been sent.")
                     st.rerun()
-                if b.button("Reject", key=f"reject_{int(pkg['id'])}"):
-                    set_package_status(int(pkg["id"]), "rejected")
+                if b.button("Reject", key=f"reject_{pkg_id}"):
+                    set_package_status(pkg_id, "rejected")
                     st.rerun()
-            elif pkg["status"] == "approved":
-                matching = batches[batches.package_id == int(pkg["id"])] if not batches.empty else pd.DataFrame()
+            elif pkg.get("status") == "approved":
+                matching = batches[batches.package_id == pkg_id] if not batches.empty and "package_id" in batches.columns else pd.DataFrame()
                 if matching.empty:
-                    if st.button("Build first prospect batch", key=f"prospects_{int(pkg['id'])}", type="primary", disabled=not api_ready):
+                    if st.button("Build first prospect batch", key=f"prospects_{pkg_id}", type="primary", disabled=not api_ready):
                         with st.spinner("Researching 15 real prospects and drafting personalized outreach..."):
                             try:
                                 build_prospect_batch(pkg)
@@ -311,23 +346,26 @@ if batches.empty:
     st.info("Approve a commercial package, then build its first prospect batch.")
 else:
     for _, batch in batches.iterrows():
+        batch_id = safe_int(batch.get("id"))
+        if batch_id is None:
+            continue
         with st.container(border=True):
             h1, h2 = st.columns([4, 1])
             with h1:
-                st.markdown(f"### {batch['title']} — Batch #{int(batch['id'])}")
+                st.markdown(f"### {batch.get('title', 'Prospect batch')} — Batch #{batch_id}")
             with h2:
-                st.write(f"**{str(batch['status']).upper()}**")
-            st.markdown(batch["batch_markdown"])
-            if batch["status"] == "draft":
+                st.write(f"**{str(batch.get('status', 'draft')).upper()}**")
+            st.markdown(batch.get("batch_markdown", ""))
+            if batch.get("status") == "draft":
                 a, b, _ = st.columns([1.4, 1, 3.6])
-                if a.button("Approve batch content", key=f"approve_batch_{int(batch['id'])}", type="primary"):
-                    approve_prospect_batch(int(batch["id"]))
+                if a.button("Approve batch content", key=f"approve_batch_{batch_id}", type="primary"):
+                    approve_prospect_batch(batch_id)
                     st.success("Batch content approved. Sending remains separately gated.")
                     st.rerun()
-                if b.button("Reject batch", key=f"reject_batch_{int(batch['id'])}"):
-                    reject_prospect_batch(int(batch["id"]))
+                if b.button("Reject batch", key=f"reject_batch_{batch_id}"):
+                    reject_prospect_batch(batch_id)
                     st.rerun()
-            elif batch["status"] == "content_approved":
+            elif batch.get("status") == "content_approved":
                 st.success("Content approved. External sending is still pending explicit approval and a connected sending channel.")
 
 with st.expander("Approval Queue", expanded=True):
