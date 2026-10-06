@@ -218,6 +218,40 @@ def reject_prospect_batch(batch_id: int):
         conn.execute("UPDATE prospect_batches SET status='rejected' WHERE id=?", (batch_id,))
 
 
+def maybe_auto_build_first_batch(packages, batches, api_ready):
+    if os.getenv("AUTO_BUILD_PROSPECT_BATCH_ONCE", "0") != "1" or not api_ready:
+        return None
+    if packages.empty or "status" not in packages.columns:
+        return None
+
+    approved = packages[packages.status == "approved"].copy()
+    if approved.empty:
+        return None
+    if "id" in approved.columns:
+        approved = approved.sort_values("id", ascending=False)
+
+    for _, pkg in approved.iterrows():
+        pkg_id = safe_int(pkg.get("id"))
+        if pkg_id is None:
+            continue
+        matching = batches[batches.package_id == pkg_id] if not batches.empty and "package_id" in batches.columns else pd.DataFrame()
+        if not matching.empty:
+            continue
+
+        session_key = f"auto_prospect_attempted_{pkg_id}"
+        if st.session_state.get(session_key):
+            return None
+        st.session_state[session_key] = True
+
+        try:
+            build_prospect_batch(pkg)
+            return f"Prospect batch automatically created for approved package #{pkg_id}. Nothing was sent."
+        except Exception as exc:
+            logger.exception("Automatic prospect batch failed")
+            return f"Automatic prospect batch failed: {type(exc).__name__}: {exc}"
+    return None
+
+
 st.sidebar.header("Revenue Operator")
 api_ready = bool(os.getenv("OPENAI_API_KEY"))
 if api_ready:
@@ -252,6 +286,17 @@ if st.sidebar.button("Run Revenue Sprint 001", disabled=not api_ready):
             st.code(f"{type(exc).__name__}: {exc}")
 
 opps, packages, batches, approvals, revenue = load_data()
+
+auto_batch_result = maybe_auto_build_first_batch(packages, batches, api_ready)
+if auto_batch_result:
+    if auto_batch_result.startswith("Prospect batch automatically created"):
+        st.session_state["auto_batch_result"] = auto_batch_result
+        st.rerun()
+    else:
+        st.error(auto_batch_result)
+
+if "auto_batch_result" in st.session_state:
+    st.success(st.session_state.pop("auto_batch_result"))
 
 c1, c2, c3, c4, c5 = st.columns(5)
 c1.metric("Opportunities", len(opps))
